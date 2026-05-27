@@ -1,0 +1,58 @@
+diff --git a/src/click/types.py b/src/click/types.py
+index 98c2d61..683d396 100644
+--- a/src/click/types.py
++++ b/src/click/types.py
+@@ -419,12 +419,25 @@ class Choice(ParamType[ParamTypeValue], t.Generic[ParamTypeValue]):
+         """
+         from click.shell_completion import CompletionItem
+ 
+-        str_choices = [self.normalize_choice(choice, ctx) for choice in self.choices]
+-        if self.case_sensitive:
+-            matched = (c for c in str_choices if c.startswith(incomplete))
+-        else:
+-            incomplete = incomplete.lower()
+-            matched = (c for c in str_choices if c.lower().startswith(incomplete))
++        # Get original choices as string with Enum handling
++        str_choices = []
++        for choice in self.choices:
++            # Use same logic as normalize_choice for the display value
++            if isinstance(choice, enum.Enum):
++                str_choices.append(choice.name)
++            else:
++                str_choices.append(str(choice))
++
++        # Normalize the incomplete string using the same normalization logic as convert()
++        temp_choice = Choice([], case_sensitive=self.case_sensitive)
++        normed_incomplete = temp_choice.normalize_choice(incomplete, ctx)
++        
++        # Normalize each choice and match
++        matched = []
++        for i, choice in enumerate(self.choices):
++            normed_choice = self.normalize_choice(choice, ctx)
++            if normed_choice.startswith(normed_incomplete):
++                matched.append(str_choices[i])
+ 
+         return [CompletionItem(c) for c in matched]
+ 
+diff --git a/tests/test_shell_completion.py b/tests/test_shell_completion.py
+index 1e3fd99..29f586a 100644
+--- a/tests/test_shell_completion.py
++++ b/tests/test_shell_completion.py
+@@ -585,3 +585,17 @@ def test_fish_format_completion_escapes_help():
+     # The newline is escaped to the literal characters backslash-n and the tab
+     # becomes a space, so each completion stays on one line for fish.
+     assert fc.format_completion(item) == "plain,--at\tfirst\\nsecond third"
++
++
++def test_choice_case_insensitive_unicode_normalization():
++    # Test case-insensitive choice completion with special Unicode characters
++    # like German 'ß' (sharp s), which casefold() to 'ss', but lower() remains 'ß'
++    cli = Command(
++        "cli",
++        params=[Option(["-a"], type=Choice(["Straße", "Strasse", "Schule"], case_sensitive=False))],
++    )
++    # Test that 'straße' casefolds to 'strasse' and matches correctly
++    assert _get_words(cli, ["-a"], "stra") == ["straße", "strasse"]
++    assert _get_words(cli, ["-a"], "sch") == ["schule"]
++    # Test with different case inputs
++    assert _get_words(cli, ["-a"], "StRa") == ["straße", "strasse"]

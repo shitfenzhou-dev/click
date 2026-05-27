@@ -585,3 +585,17 @@ def test_fish_format_completion_escapes_help():
     # The newline is escaped to the literal characters backslash-n and the tab
     # becomes a space, so each completion stays on one line for fish.
     assert fc.format_completion(item) == "plain,--at\tfirst\\nsecond third"
+
+
+def test_choice_case_insensitive_unicode_normalization():
+    # Test case-insensitive choice completion with special Unicode characters
+    # like German 'ß' (sharp s), which casefold() to 'ss', but lower() remains 'ß'
+    cli = Command(
+        "cli",
+        params=[Option(["-a"], type=Choice(["Straße", "Strasse", "Schule"], case_sensitive=False))],
+    )
+    # Test that 'straße' casefolds to 'strasse' and matches correctly
+    assert _get_words(cli, ["-a"], "stra") == ["straße", "strasse"]
+    assert _get_words(cli, ["-a"], "sch") == ["schule"]
+    # Test with different case inputs
+    assert _get_words(cli, ["-a"], "StRa") == ["straße", "strasse"]
