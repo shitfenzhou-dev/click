@@ -485,6 +485,15 @@ def test_choice_case_sensitive(value, expect):
     assert completions == expect
 
 
+def test_choice_case_insensitive_unicode():
+    cli = Command(
+        "cli",
+        params=[Option(["-a"], type=Choice(["Straße", "Apfel"], case_sensitive=False))],
+    )
+    assert _get_words(cli, ["-a"], "ST") == ["Straße"]
+    assert _get_words(cli, ["-a"], "AP") == ["Apfel"]
+
+
 @pytest.fixture()
 def _restore_available_shells(tmpdir):
     prev_available_shells = click.shell_completion._available_shells.copy()

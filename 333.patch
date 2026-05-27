@@ -1,0 +1,35 @@
+diff --git a/src/click/types.py b/src/click/types.py
+index 98c2d61..9eeb473 100644
+--- a/src/click/types.py
++++ b/src/click/types.py
+@@ -423,8 +423,8 @@ class Choice(ParamType[ParamTypeValue], t.Generic[ParamTypeValue]):
+         if self.case_sensitive:
+             matched = (c for c in str_choices if c.startswith(incomplete))
+         else:
+-            incomplete = incomplete.lower()
+-            matched = (c for c in str_choices if c.lower().startswith(incomplete))
++            incomplete = incomplete.casefold()
++            matched = (c for c in str_choices if c.startswith(incomplete))
+ 
+         return [CompletionItem(c) for c in matched]
+ 
+diff --git a/tests/test_shell_completion.py b/tests/test_shell_completion.py
+index 1e3fd99..2b4bd5f 100644
+--- a/tests/test_shell_completion.py
++++ b/tests/test_shell_completion.py
+@@ -485,6 +485,15 @@ def test_choice_case_sensitive(value, expect):
+     assert completions == expect
+ 
+ 
++def test_choice_case_insensitive_unicode():
++    cli = Command(
++        "cli",
++        params=[Option(["-a"], type=Choice(["Straße", "Apfel"], case_sensitive=False))],
++    )
++    assert _get_words(cli, ["-a"], "ST") == ["Straße"]
++    assert _get_words(cli, ["-a"], "AP") == ["Apfel"]
++
++
+ @pytest.fixture()
+ def _restore_available_shells(tmpdir):
+     prev_available_shells = click.shell_completion._available_shells.copy()
