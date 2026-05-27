@@ -474,7 +474,7 @@ def test_context_settings(runner):
     assert result.output == "plain,a\nplain,b\n"
 
 
-# case_sensitive=False normalizes values to lowercase, matching remains case insensitive
+# case_sensitive=False normalizes values for case-insensitive matching
 @pytest.mark.parametrize(("value", "expect"), [(False, ["au", "al"]), (True, ["al"])])
 def test_choice_case_sensitive(value, expect):
     cli = Command(
@@ -483,6 +483,15 @@ def test_choice_case_sensitive(value, expect):
     )
     completions = _get_words(cli, ["-a"], "a")
     assert completions == expect
+
+
+def test_choice_casefold_incomplete():
+    cli = Command(
+        "cli",
+        params=[Option(["-a"], type=Choice(["ss", "ßa"], case_sensitive=False))],
+    )
+    completions = _get_words(cli, ["-a"], "ẞ")
+    assert completions == ["ss", "ssa"]
 
 
 @pytest.fixture()
