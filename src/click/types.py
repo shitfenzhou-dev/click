@@ -419,12 +419,20 @@ class Choice(ParamType[ParamTypeValue], t.Generic[ParamTypeValue]):
         """
         from click.shell_completion import CompletionItem
 
-        str_choices = [self.normalize_choice(choice, ctx) for choice in self.choices]
+        normalized_mapping = self._normalized_mapping(ctx=ctx)
         if self.case_sensitive:
-            matched = (c for c in str_choices if c.startswith(incomplete))
+            matched = (
+                choice.name if isinstance(choice, enum.Enum) else str(choice)
+                for choice, normalized in normalized_mapping.items()
+                if normalized.startswith(incomplete)
+            )
         else:
-            incomplete = incomplete.casefold()
-            matched = (c for c in str_choices if c.startswith(incomplete))
+            incomplete_normalized = self.normalize_choice(incomplete, ctx)
+            matched = (
+                choice.name if isinstance(choice, enum.Enum) else str(choice)
+                for choice, normalized in normalized_mapping.items()
+                if normalized.startswith(incomplete_normalized)
+            )
 
         return [CompletionItem(c) for c in matched]
 
