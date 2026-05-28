@@ -1,0 +1,62 @@
+diff --git a/src/click/_termui_impl.py b/src/click/_termui_impl.py
+index 76113e9..5cb9355 100644
+--- a/src/click/_termui_impl.py
++++ b/src/click/_termui_impl.py
+@@ -225,10 +225,10 @@ class ProgressBar(t.Generic[V]):
+             bar = "".join(chars)
+         return bar
+ 
+-    def format_progress_line(self) -> str:
++    def _format_progress_info(self) -> str:
+         show_percent = self.show_percent
++        info_bits: list[str] = []
+ 
+-        info_bits = []
+         if self.length is not None and show_percent is None:
+             show_percent = not self.show_pos
+ 
+@@ -243,12 +243,15 @@ class ProgressBar(t.Generic[V]):
+             if item_info is not None:
+                 info_bits.append(item_info)
+ 
++        return self.info_sep.join(info_bits)
++
++    def format_progress_line(self) -> str:
+         return (
+             self.bar_template
+             % {
+                 "label": self.label,
+                 "bar": self.format_bar(),
+-                "info": self.info_sep.join(info_bits),
++                "info": self._format_progress_info(),
+             }
+         ).rstrip()
+ 
+diff --git a/tests/test_termui.py b/tests/test_termui.py
+index f715154..c72aa20 100644
+--- a/tests/test_termui.py
++++ b/tests/test_termui.py
+@@ -192,6 +192,23 @@ def test_progressbar_format_progress_line_with_show_func(runner, test_item):
+             assert progress.format_progress_line().endswith(progress.format_pct())
+ 
+ 
++def test_progressbar_format_progress_line_info_order(runner):
++    with _create_progress(
++        width=8,
++        show_percent=True,
++        show_pos=True,
++        pos=9,
++        eta_known=True,
++        avg=[30],
++        current_item="alpha",
++        item_show_func=lambda item: item,
++    ) as progress:
++        assert (
++            progress.format_progress_line()
++            == "  [#######-]  9/10   90%  00:00:30  alpha"
++        )
++
++
+ def test_progressbar_init_exceptions(runner):
+     with pytest.raises(TypeError, match="iterable or length is required"):
+         click.progressbar()

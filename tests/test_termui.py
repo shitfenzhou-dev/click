@@ -192,6 +192,23 @@ def test_progressbar_format_progress_line_with_show_func(runner, test_item):
             assert progress.format_progress_line().endswith(progress.format_pct())
 
 
+def test_progressbar_format_progress_line_info_order(runner):
+    with _create_progress(
+        width=8,
+        show_percent=True,
+        show_pos=True,
+        pos=9,
+        eta_known=True,
+        avg=[30],
+        current_item="alpha",
+        item_show_func=lambda item: item,
+    ) as progress:
+        assert (
+            progress.format_progress_line()
+            == "  [#######-]  9/10   90%  00:00:30  alpha"
+        )
+
+
 def test_progressbar_init_exceptions(runner):
     with pytest.raises(TypeError, match="iterable or length is required"):
         click.progressbar()

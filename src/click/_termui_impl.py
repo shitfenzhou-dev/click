@@ -225,10 +225,10 @@ class ProgressBar(t.Generic[V]):
             bar = "".join(chars)
         return bar
 
-    def format_progress_line(self) -> str:
+    def _format_progress_info(self) -> str:
         show_percent = self.show_percent
+        info_bits: list[str] = []
 
-        info_bits = []
         if self.length is not None and show_percent is None:
             show_percent = not self.show_pos
 
@@ -243,12 +243,15 @@ class ProgressBar(t.Generic[V]):
             if item_info is not None:
                 info_bits.append(item_info)
 
+        return self.info_sep.join(info_bits)
+
+    def format_progress_line(self) -> str:
         return (
             self.bar_template
             % {
                 "label": self.label,
                 "bar": self.format_bar(),
-                "info": self.info_sep.join(info_bits),
+                "info": self._format_progress_info(),
             }
         ).rstrip()
 
