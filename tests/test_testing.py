@@ -3,6 +3,7 @@ import io
 import os
 import pdb
 import sys
+import typing as t
 from io import BytesIO
 
 import pytest
@@ -553,6 +554,79 @@ def test_capture_fd_windows_error():
         CliRunner(capture="fd")
 
 
+def test_invoke_capture_invalid_mode():
+    with pytest.raises(ValueError, match="capture"):
+        CliRunner().invoke(click.Command("test"), capture="bad")  # type: ignore[arg-type]
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows-only test")
+def test_invoke_capture_fd_windows_error():
+    with pytest.raises(ValueError, match="not supported on Windows"):
+        CliRunner().invoke(click.Command("test"), capture="fd")
+
+
+@needs_fd_capture
+def test_invoke_capture_override():
+    @click.command()
+    def cli():
+        click.echo("python stdout")
+        os.write(1, b"fd stdout\n")
+
+    runner = CliRunner(capture="sys")
+    result = runner.invoke(cli, capture="fd")
+    assert "python stdout" in result.stdout
+    assert "fd stdout" in result.stdout
+    assert runner.capture == "sys"
+
+    runner = CliRunner(capture="fd")
+    result = runner.invoke(cli, capture="sys")
+    assert "python stdout" in result.stdout
+    assert "fd stdout" not in result.stdout
+    assert runner.capture == "fd"
+
+
+@needs_fd_capture
+def test_invoke_capture_none_uses_runner_default():
+    @click.command()
+    def cli():
+        click.echo("python stdout")
+        os.write(1, b"fd stdout\n")
+
+    runner = CliRunner(capture="fd")
+    result = runner.invoke(cli, capture=None)
+    assert "python stdout" in result.stdout
+    assert "fd stdout" in result.stdout
+
+
+@needs_fd_capture
+def test_invoke_capture_default_matches_runner_default():
+    @click.command()
+    def cli():
+        click.echo("python stdout")
+        os.write(1, b"fd stdout\n")
+
+    runner = CliRunner(capture="sys")
+    result = runner.invoke(cli)
+    assert "python stdout" in result.stdout
+    assert "fd stdout" not in result.stdout
+
+
+@needs_fd_capture
+def test_invoke_capture_preserves_runner_for_later_calls():
+    @click.command()
+    def cli():
+        click.echo("python stdout")
+        os.write(1, b"fd stdout\n")
+
+    runner = CliRunner(capture="sys")
+    override_result = runner.invoke(cli, capture="fd")
+    default_result = runner.invoke(cli)
+
+    assert "fd stdout" in override_result.stdout
+    assert "fd stdout" not in default_result.stdout
+    assert runner.capture == "sys"
+
+
 @needs_fd_capture
 def test_capture_fd_os_write():
     """capture='fd' captures writes to fd 1/2 that bypass sys.stdout."""
@@ -740,7 +814,7 @@ def test_capture_pytest_matrix(
         click.echo("inside-stdout")
         click.echo("inside-stderr", err=True)
 
-    runner = CliRunner(capture=runner_capture)
+    runner = CliRunner(capture=t.cast(t.Any, runner_capture))
     result = runner.invoke(cli)
 
     # CliRunner sees Click's output.
