@@ -758,3 +758,119 @@ def test_capture_pytest_matrix(
     # Click output is not leaking into Pytest.
     assert "inside-stdout" not in captured.out
     assert "inside-stderr" not in captured.err
+
+
+def test_invoke_capture_default():
+    """invoke() without capture uses self.capture (default 'sys')."""
+
+    @click.command()
+    def cli():
+        click.echo("hello")
+
+    runner = CliRunner()
+    result = runner.invoke(cli)
+    assert result.exit_code == 0
+    assert result.stdout == "hello\n"
+
+
+def test_invoke_capture_none_uses_self_capture():
+    """invoke(capture=None) uses self.capture, same as omitting it."""
+
+    @click.command()
+    def cli():
+        click.echo("hello")
+
+    runner = CliRunner(capture="sys")
+    result = runner.invoke(cli, capture=None)
+    assert result.exit_code == 0
+    assert result.stdout == "hello\n"
+
+
+def test_invoke_capture_override_does_not_mutate_self():
+    """invoke(capture=...) overrides for one call only, self.capture is unchanged."""
+
+    @click.command()
+    def cli():
+        click.echo("hello")
+
+    runner = CliRunner(capture="sys")
+    assert runner.capture == "sys"
+    result = runner.invoke(cli, capture="sys")
+    assert runner.capture == "sys"
+    assert result.exit_code == 0
+    assert result.stdout == "hello\n"
+
+
+def test_invoke_capture_invalid_raises():
+    """invoke(capture='bad') raises ValueError consistent with __init__."""
+
+    @click.command()
+    def cli():
+        click.echo("hello")
+
+    runner = CliRunner()
+    with pytest.raises(ValueError, match="capture"):
+        runner.invoke(cli, capture="bad")
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows-only test")
+def test_invoke_capture_fd_windows_error():
+    """invoke(capture='fd') raises ValueError on Windows."""
+
+    @click.command()
+    def cli():
+        click.echo("hello")
+
+    runner = CliRunner(capture="sys")
+    with pytest.raises(ValueError, match="not supported on Windows"):
+        runner.invoke(cli, capture="fd")
+
+
+@needs_fd_capture
+def test_invoke_capture_sys_to_fd_override():
+    """CliRunner(capture='sys').invoke(cli, capture='fd') uses fd capture."""
+
+    @click.command()
+    def cli():
+        click.echo("python stdout")
+        os.write(1, b"fd stdout\n")
+
+    runner = CliRunner(capture="sys")
+    result = runner.invoke(cli, capture="fd")
+    assert "python stdout" in result.stdout
+    assert "fd stdout" in result.stdout
+    assert runner.capture == "sys"
+
+
+@needs_fd_capture
+def test_invoke_capture_fd_to_sys_override():
+    """CliRunner(capture='fd').invoke(cli, capture='sys') uses sys capture."""
+
+    @click.command()
+    def cli():
+        click.echo("python stdout")
+        os.write(1, b"fd stdout\n")
+
+    runner = CliRunner(capture="fd")
+    result = runner.invoke(cli, capture="sys")
+    assert "python stdout" in result.stdout
+    assert "fd stdout" not in result.stdout
+    assert runner.capture == "fd"
+
+
+@needs_fd_capture
+def test_invoke_capture_override_restores_after_invoke():
+    """After invoke(capture='fd') on a sys runner, subsequent invoke uses sys."""
+
+    @click.command()
+    def cli():
+        click.echo("python stdout")
+        os.write(1, b"fd stdout\n")
+
+    runner = CliRunner(capture="sys")
+    result_fd = runner.invoke(cli, capture="fd")
+    assert "fd stdout" in result_fd.stdout
+
+    result_sys = runner.invoke(cli)
+    assert "fd stdout" not in result_sys.stdout
+    assert "python stdout" in result_sys.stdout

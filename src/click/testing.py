@@ -565,6 +565,7 @@ class CliRunner:
         env: cabc.Mapping[str, str | None] | None = None,
         catch_exceptions: bool | None = None,
         color: bool = False,
+        capture: CaptureMode | None = None,
         **extra: t.Any,
     ) -> Result:
         """Invokes a command in an isolated environment.  The arguments are
@@ -587,6 +588,15 @@ class CliRunner:
         :param extra: the keyword arguments to pass to :meth:`main`.
         :param color: whether the output should contain color codes. The
                       application can still override this explicitly.
+        :param capture: Override the runner's default capture mode for this
+                        invocation only. ``None`` (default) uses
+                        ``self.capture``; ``"sys"`` or ``"fd"`` overrides it
+                        for this call without mutating ``self.capture``.
+                        The same validation rules as the ``capture`` parameter
+                        of :class:`CliRunner` apply.
+
+        .. versionadded:: 8.4.0
+            Added the ``capture`` parameter.
 
         .. versionadded:: 8.2
             The result object has the ``output_bytes`` attribute with
@@ -614,11 +624,21 @@ class CliRunner:
         if catch_exceptions is None:
             catch_exceptions = self.catch_exceptions
 
+        effective_capture: CaptureMode = capture if capture is not None else self.capture
+        if effective_capture not in {"sys", "fd"}:
+            raise ValueError(
+                f"capture={capture!r} is not valid. Choose from 'sys' or 'fd'."
+            )
+        if effective_capture == "fd" and sys.platform == "win32":
+            raise ValueError(
+                f"capture={effective_capture!r} is not supported on Windows. Use 'sys'."
+            )
+
         # Set up fd capture before isolation replaces sys.stdout and sys.stderr.
         cap_out: _FDCapture | None = None
         cap_err: _FDCapture | None = None
 
-        if self.capture == "fd":
+        if effective_capture == "fd":
             cap_out = _FDCapture(1)
             cap_err = _FDCapture(2)
             try:
