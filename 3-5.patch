@@ -1,0 +1,15 @@
+diff --git a/src/click/types.py b/src/click/types.py
+index 98c2d61..9eeb473 100644
+--- a/src/click/types.py
++++ b/src/click/types.py
+@@ -423,8 +423,8 @@ class Choice(ParamType[ParamTypeValue], t.Generic[ParamTypeValue]):
+         if self.case_sensitive:
+             matched = (c for c in str_choices if c.startswith(incomplete))
+         else:
+-            incomplete = incomplete.lower()
+-            matched = (c for c in str_choices if c.lower().startswith(incomplete))
++            incomplete = incomplete.casefold()
++            matched = (c for c in str_choices if c.startswith(incomplete))
+ 
+         return [CompletionItem(c) for c in matched]
+ 
