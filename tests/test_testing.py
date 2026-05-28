@@ -758,3 +758,76 @@ def test_capture_pytest_matrix(
     # Click output is not leaking into Pytest.
     assert "inside-stdout" not in captured.out
     assert "inside-stderr" not in captured.err
+
+
+def test_invoke_capture_invalid_mode():
+    """Invalid capture mode in invoke() raises ValueError."""
+    runner = CliRunner()
+    with pytest.raises(ValueError, match="capture"):
+        runner.invoke(click.Command("test"), capture="invalid")  # type: ignore[arg-type]
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows-only test")
+def test_invoke_capture_fd_windows_error():
+    """fd capture in invoke() raises ValueError on Windows."""
+    runner = CliRunner()
+    with pytest.raises(ValueError, match="not supported on Windows"):
+        runner.invoke(click.Command("test"), capture="fd")
+
+
+@needs_fd_capture
+def test_invoke_capture_override():
+    """invoke() capture parameter overrides runner default."""
+
+    @click.command()
+    def cli():
+        click.echo("python stdout")
+        os.write(1, b"fd stdout\n")
+
+    # Test sys -> fd override
+    runner_sys = CliRunner(capture="sys")
+    result_sys_default = runner_sys.invoke(cli)
+    assert "python stdout" in result_sys_default.stdout
+    assert "fd stdout" not in result_sys_default.stdout
+
+    result_sys_override = runner_sys.invoke(cli, capture="fd")
+    assert "python stdout" in result_sys_override.stdout
+    assert "fd stdout" in result_sys_override.stdout
+
+    # Test fd -> sys override
+    runner_fd = CliRunner(capture="fd")
+    result_fd_default = runner_fd.invoke(cli)
+    assert "python stdout" in result_fd_default.stdout
+    assert "fd stdout" in result_fd_default.stdout
+
+    result_fd_override = runner_fd.invoke(cli, capture="sys")
+    assert "python stdout" in result_fd_override.stdout
+    assert "fd stdout" not in result_fd_override.stdout
+
+
+@needs_fd_capture
+def test_invoke_capture_none_uses_runner_default():
+    """invoke(capture=None) uses runner's default capture mode."""
+
+    @click.command()
+    def cli():
+        click.echo("python stdout")
+        os.write(1, b"fd stdout\n")
+
+    runner_fd = CliRunner(capture="fd")
+    result = runner_fd.invoke(cli, capture=None)
+    assert "python stdout" in result.stdout
+    assert "fd stdout" in result.stdout
+
+
+def test_invoke_capture_no_param_uses_runner_default():
+    """invoke() without capture parameter uses runner's default capture mode."""
+    runner_sys = CliRunner(capture="sys")
+
+    @click.command()
+    def cli():
+        click.echo("test")
+
+    result = runner_sys.invoke(cli)
+    assert result.stdout == "test\n"
+    assert result.exit_code == 0

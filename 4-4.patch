@@ -1,0 +1,134 @@
+diff --git a/src/click/testing.py b/src/click/testing.py
+index 1eb81d2..7a761af 100644
+--- a/src/click/testing.py
++++ b/src/click/testing.py
+@@ -565,6 +565,7 @@ class CliRunner:
+         env: cabc.Mapping[str, str | None] | None = None,
+         catch_exceptions: bool | None = None,
+         color: bool = False,
++        capture: CaptureMode | None = None,
+         **extra: t.Any,
+     ) -> Result:
+         """Invokes a command in an isolated environment.  The arguments are
+@@ -587,6 +588,13 @@ class CliRunner:
+         :param extra: the keyword arguments to pass to :meth:`main`.
+         :param color: whether the output should contain color codes. The
+                       application can still override this explicitly.
++        :param capture: Selects the output capture strategy for this invocation.
++                        If :data:`None`, the value from :class:`CliRunner` is used.
++                        ``sys`` (default) captures Python-level writes only.
++                        ``fd`` redirects file descriptors 1 and 2 via :func:`os.dup2`
++                        to a temporary file, also catching output from stale stream
++                        references, C extensions, and subprocesses. ``fd`` is not
++                        supported on Windows.
+ 
+         .. versionadded:: 8.2
+             The result object has the ``output_bytes`` attribute with
+@@ -614,11 +622,25 @@ class CliRunner:
+         if catch_exceptions is None:
+             catch_exceptions = self.catch_exceptions
+ 
++        # Determine capture mode for this invocation
++        current_capture = capture
++        if current_capture is None:
++            current_capture = self.capture
++        else:
++            if current_capture not in {"sys", "fd"}:
++                raise ValueError(
++                    f"capture={current_capture!r} is not valid. Choose from 'sys' or 'fd'."
++                )
++            if current_capture == "fd" and sys.platform == "win32":
++                raise ValueError(
++                    f"capture={current_capture!r} is not supported on Windows. Use 'sys'."
++                )
++
+         # Set up fd capture before isolation replaces sys.stdout and sys.stderr.
+         cap_out: _FDCapture | None = None
+         cap_err: _FDCapture | None = None
+ 
+-        if self.capture == "fd":
++        if current_capture == "fd":
+             cap_out = _FDCapture(1)
+             cap_err = _FDCapture(2)
+             try:
+diff --git a/tests/test_testing.py b/tests/test_testing.py
+index a7508b9..4631e1d 100644
+--- a/tests/test_testing.py
++++ b/tests/test_testing.py
+@@ -758,3 +758,76 @@ def test_capture_pytest_matrix(
+     # Click output is not leaking into Pytest.
+     assert "inside-stdout" not in captured.out
+     assert "inside-stderr" not in captured.err
++
++
++def test_invoke_capture_invalid_mode():
++    """Invalid capture mode in invoke() raises ValueError."""
++    runner = CliRunner()
++    with pytest.raises(ValueError, match="capture"):
++        runner.invoke(click.Command("test"), capture="invalid")  # type: ignore[arg-type]
++
++
++@pytest.mark.skipif(sys.platform != "win32", reason="Windows-only test")
++def test_invoke_capture_fd_windows_error():
++    """fd capture in invoke() raises ValueError on Windows."""
++    runner = CliRunner()
++    with pytest.raises(ValueError, match="not supported on Windows"):
++        runner.invoke(click.Command("test"), capture="fd")
++
++
++@needs_fd_capture
++def test_invoke_capture_override():
++    """invoke() capture parameter overrides runner default."""
++
++    @click.command()
++    def cli():
++        click.echo("python stdout")
++        os.write(1, b"fd stdout\n")
++
++    # Test sys -> fd override
++    runner_sys = CliRunner(capture="sys")
++    result_sys_default = runner_sys.invoke(cli)
++    assert "python stdout" in result_sys_default.stdout
++    assert "fd stdout" not in result_sys_default.stdout
++
++    result_sys_override = runner_sys.invoke(cli, capture="fd")
++    assert "python stdout" in result_sys_override.stdout
++    assert "fd stdout" in result_sys_override.stdout
++
++    # Test fd -> sys override
++    runner_fd = CliRunner(capture="fd")
++    result_fd_default = runner_fd.invoke(cli)
++    assert "python stdout" in result_fd_default.stdout
++    assert "fd stdout" in result_fd_default.stdout
++
++    result_fd_override = runner_fd.invoke(cli, capture="sys")
++    assert "python stdout" in result_fd_override.stdout
++    assert "fd stdout" not in result_fd_override.stdout
++
++
++@needs_fd_capture
++def test_invoke_capture_none_uses_runner_default():
++    """invoke(capture=None) uses runner's default capture mode."""
++
++    @click.command()
++    def cli():
++        click.echo("python stdout")
++        os.write(1, b"fd stdout\n")
++
++    runner_fd = CliRunner(capture="fd")
++    result = runner_fd.invoke(cli, capture=None)
++    assert "python stdout" in result.stdout
++    assert "fd stdout" in result.stdout
++
++
++def test_invoke_capture_no_param_uses_runner_default():
++    """invoke() without capture parameter uses runner's default capture mode."""
++    runner_sys = CliRunner(capture="sys")
++
++    @click.command()
++    def cli():
++        click.echo("test")
++
++    result = runner_sys.invoke(cli)
++    assert result.stdout == "test\n"
++    assert result.exit_code == 0
