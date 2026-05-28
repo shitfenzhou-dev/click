@@ -758,3 +758,54 @@ def test_capture_pytest_matrix(
     # Click output is not leaking into Pytest.
     assert "inside-stdout" not in captured.out
     assert "inside-stderr" not in captured.err
+
+
+@needs_fd_capture
+def test_invoke_capture_override():
+    """Test that invoke can override the runner's capture mode."""
+    @click.command()
+    def cli():
+        os.write(1, b"fd stdout\n")
+        click.echo("py stdout")
+
+    # Runner defaults to 'sys', overridden to 'fd'
+    runner_sys = CliRunner(capture="sys")
+    result_fd = runner_sys.invoke(cli, capture="fd")
+    assert "fd stdout" in result_fd.stdout
+    assert "py stdout" in result_fd.stdout
+
+    # Runner defaults to 'fd', overridden to 'sys'
+    runner_fd = CliRunner(capture="fd")
+    result_sys = runner_fd.invoke(cli, capture="sys")
+    assert "fd stdout" not in result_sys.stdout
+    assert "py stdout" in result_sys.stdout
+
+    # Runner defaults to 'sys', capture=None uses 'sys'
+    result_none = runner_sys.invoke(cli, capture=None)
+    assert "fd stdout" not in result_none.stdout
+    assert "py stdout" in result_none.stdout
+
+
+def test_invoke_capture_invalid_mode():
+    """Invalid capture mode in invoke raises ValueError."""
+    runner = CliRunner()
+    
+    @click.command()
+    def cli():
+        pass
+        
+    with pytest.raises(ValueError, match="capture"):
+        runner.invoke(cli, capture="invalid")  # type: ignore[arg-type]
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows-only test")
+def test_invoke_capture_fd_windows_error():
+    """fd capture in invoke raises ValueError on Windows."""
+    runner = CliRunner(capture="sys")
+    
+    @click.command()
+    def cli():
+        pass
+        
+    with pytest.raises(ValueError, match="not supported on Windows"):
+        runner.invoke(cli, capture="fd")

@@ -1,0 +1,107 @@
+diff --git a/src/click/testing.py b/src/click/testing.py
+index 1eb81d2..4981f3e 100644
+--- a/src/click/testing.py
++++ b/src/click/testing.py
+@@ -565,6 +565,7 @@ class CliRunner:
+         env: cabc.Mapping[str, str | None] | None = None,
+         catch_exceptions: bool | None = None,
+         color: bool = False,
++        capture: CaptureMode | None = None,
+         **extra: t.Any,
+     ) -> Result:
+         """Invokes a command in an isolated environment.  The arguments are
+@@ -587,6 +588,11 @@ class CliRunner:
+         :param extra: the keyword arguments to pass to :meth:`main`.
+         :param color: whether the output should contain color codes. The
+                       application can still override this explicitly.
++        :param capture: Overrides the runner's capture mode for this invocation.
++                        If :data:`None`, the value from :class:`CliRunner` is used.
++
++        .. versionadded:: 8.4.0
++            Added the ``capture`` parameter.
+ 
+         .. versionadded:: 8.2
+             The result object has the ``output_bytes`` attribute with
+@@ -614,11 +620,22 @@ class CliRunner:
+         if catch_exceptions is None:
+             catch_exceptions = self.catch_exceptions
+ 
++        if capture is None:
++            capture = self.capture
++        elif capture not in {"sys", "fd"}:
++            raise ValueError(
++                f"capture={capture!r} is not valid. Choose from 'sys' or 'fd'."
++            )
++        elif capture == "fd" and sys.platform == "win32":
++            raise ValueError(
++                f"capture={capture!r} is not supported on Windows. Use 'sys'."
++            )
++
+         # Set up fd capture before isolation replaces sys.stdout and sys.stderr.
+         cap_out: _FDCapture | None = None
+         cap_err: _FDCapture | None = None
+ 
+-        if self.capture == "fd":
++        if capture == "fd":
+             cap_out = _FDCapture(1)
+             cap_err = _FDCapture(2)
+             try:
+diff --git a/tests/test_testing.py b/tests/test_testing.py
+index a7508b9..3c97bf4 100644
+--- a/tests/test_testing.py
++++ b/tests/test_testing.py
+@@ -758,3 +758,54 @@ def test_capture_pytest_matrix(
+     # Click output is not leaking into Pytest.
+     assert "inside-stdout" not in captured.out
+     assert "inside-stderr" not in captured.err
++
++
++@needs_fd_capture
++def test_invoke_capture_override():
++    """Test that invoke can override the runner's capture mode."""
++    @click.command()
++    def cli():
++        os.write(1, b"fd stdout\n")
++        click.echo("py stdout")
++
++    # Runner defaults to 'sys', overridden to 'fd'
++    runner_sys = CliRunner(capture="sys")
++    result_fd = runner_sys.invoke(cli, capture="fd")
++    assert "fd stdout" in result_fd.stdout
++    assert "py stdout" in result_fd.stdout
++
++    # Runner defaults to 'fd', overridden to 'sys'
++    runner_fd = CliRunner(capture="fd")
++    result_sys = runner_fd.invoke(cli, capture="sys")
++    assert "fd stdout" not in result_sys.stdout
++    assert "py stdout" in result_sys.stdout
++
++    # Runner defaults to 'sys', capture=None uses 'sys'
++    result_none = runner_sys.invoke(cli, capture=None)
++    assert "fd stdout" not in result_none.stdout
++    assert "py stdout" in result_none.stdout
++
++
++def test_invoke_capture_invalid_mode():
++    """Invalid capture mode in invoke raises ValueError."""
++    runner = CliRunner()
++    
++    @click.command()
++    def cli():
++        pass
++        
++    with pytest.raises(ValueError, match="capture"):
++        runner.invoke(cli, capture="invalid")  # type: ignore[arg-type]
++
++
++@pytest.mark.skipif(sys.platform != "win32", reason="Windows-only test")
++def test_invoke_capture_fd_windows_error():
++    """fd capture in invoke raises ValueError on Windows."""
++    runner = CliRunner(capture="sys")
++    
++    @click.command()
++    def cli():
++        pass
++        
++    with pytest.raises(ValueError, match="not supported on Windows"):
++        runner.invoke(cli, capture="fd")
