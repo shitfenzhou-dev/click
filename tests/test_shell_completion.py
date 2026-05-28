@@ -485,6 +485,20 @@ def test_choice_case_sensitive(value, expect):
     assert completions == expect
 
 
+def test_choice_unicode_casefold():
+    # Test Unicode case folding, especially German ß
+    cli = Command(
+        "cli",
+        params=[Option(["-s"], type=Choice(["straße", "straße1", "abc"], case_sensitive=False))],
+    )
+    completions = _get_words(cli, ["-s"], "strass")
+    assert completions == ["straße", "straße1"]
+    completions = _get_words(cli, ["-s"], "StRaß")
+    assert completions == ["straße", "straße1"]
+    completions = _get_words(cli, ["-s"], "a")
+    assert completions == ["abc"]
+
+
 @pytest.fixture()
 def _restore_available_shells(tmpdir):
     prev_available_shells = click.shell_completion._available_shells.copy()
