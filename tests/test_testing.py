@@ -758,3 +758,96 @@ def test_capture_pytest_matrix(
     # Click output is not leaking into Pytest.
     assert "inside-stdout" not in captured.out
     assert "inside-stderr" not in captured.err
+
+
+def test_invoke_capture_override_sys_to_fd():
+    """Runner with capture='sys' should respect invoke(capture='fd')."""
+
+    @click.command()
+    def cli():
+        click.echo("python out")
+        os.write(1, b"fd out\n")
+
+    runner = CliRunner(capture="sys")
+    result = runner.invoke(cli, capture="fd")
+    assert "python out" in result.stdout
+    assert "fd out" in result.stdout
+
+
+@needs_fd_capture
+def test_invoke_capture_override_fd_to_sys():
+    """Runner with capture='fd' should respect invoke(capture='sys')."""
+
+    @click.command()
+    def cli():
+        click.echo("python out")
+        os.write(1, b"fd out\n")
+        with pytest.raises(io.UnsupportedOperation):
+            sys.stdout.fileno()
+
+    runner = CliRunner(capture="fd")
+    result = runner.invoke(cli, capture="sys")
+    assert "python out" in result.stdout
+    assert "fd out" not in result.stdout
+
+
+def test_invoke_capture_none_uses_runner_default():
+    """invoke(capture=None) and omit capture keep existing behavior."""
+
+    @click.command()
+    def cli():
+        os.write(1, b"fd out\n")
+        click.echo("python out")
+
+    runner_fd = CliRunner(capture="fd")
+    result = runner_fd.invoke(cli, capture=None)
+    assert "python out" in result.stdout
+    assert "fd out" in result.stdout
+
+    result = runner_fd.invoke(cli)
+    assert "python out" in result.stdout
+    assert "fd out" in result.stdout
+
+    runner_sys = CliRunner(capture="sys")
+    result = runner_sys.invoke(cli, capture=None)
+    assert "python out" in result.stdout
+    assert "fd out" not in result.stdout
+
+    result = runner_sys.invoke(cli)
+    assert "python out" in result.stdout
+    assert "fd out" not in result.stdout
+
+
+def test_invoke_capture_invalid_value():
+    """invoke(capture='bad') raises ValueError matching __init__ style."""
+    runner = CliRunner(capture="sys")
+
+    with pytest.raises(ValueError, match="capture"):
+        runner.invoke(click.command()(lambda: None), capture="bad")  # type: ignore[arg-type]
+
+
+def test_invoke_capture_does_not_modify_runner():
+    """invoke(capture=...) should not mutate self.capture on the runner."""
+
+    @click.command()
+    def cli():
+        click.echo("ok")
+
+    runner = CliRunner(capture="sys")
+    assert runner.capture == "sys"
+    runner.invoke(cli, capture="fd")
+    assert runner.capture == "sys"
+
+    runner = CliRunner(capture="fd")
+    assert runner.capture == "fd"
+    runner.invoke(cli, capture="sys")
+    assert runner.capture == "fd"
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows-only test")
+def test_invoke_capture_fd_windows_error():
+    """invoke(capture='fd') on Windows raises ValueError."""
+    runner = CliRunner(capture="sys")
+
+    with pytest.raises(ValueError, match="not supported on Windows"):
+        runner.invoke(click.command()(lambda: None), capture="fd")
