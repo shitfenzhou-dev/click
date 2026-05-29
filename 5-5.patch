@@ -1,0 +1,155 @@
+diff --git a/src/click/core.py b/src/click/core.py
+index bc04f64..2dac232 100644
+--- a/src/click/core.py
++++ b/src/click/core.py
+@@ -2584,6 +2584,74 @@ class Parameter(ABC):
+ 
+         return rv
+ 
++    def _should_update_param_slot(
++        self,
++        ctx: Context,
++        existing_value: t.Any,
++        existing_source: ParameterSource | None,
++        existing_default_explicit: bool,
++        source: ParameterSource,
++    ) -> bool:
++        """Decide whether this parameter should write its value into the
++        ``ctx.params`` slot for ``self.name``.
++
++        When multiple options target the same parameter name (feature-switch
++        groups), this method arbitrates which option wins based on
++        :class:`ParameterSource` priority and the explicit-default tie-break.
++
++        :param ctx: The invocation context.
++        :param existing_value: The value currently in ``ctx.params[self.name]``.
++        :param existing_source: The :class:`ParameterSource` of the existing value.
++        :param existing_default_explicit: Whether the existing option had its
++            ``default`` set explicitly.
++        :param source: The :class:`ParameterSource` of the current parameter.
++        """
++        slot_empty = existing_value is UNSET
++        more_explicit = existing_source is not None and source < existing_source
++        same_source = existing_source is not None and source == existing_source
++        auto_would_downgrade_explicit = (
++            same_source
++            and source == ParameterSource.DEFAULT
++            and existing_default_explicit
++            and not self._default_explicit
++        )
++        return (
++            slot_empty
++            or more_explicit
++            or (same_source and not auto_would_downgrade_explicit)
++        )
++
++    def _apply_param_slot_update(
++        self, ctx: Context, value: t.Any
++    ) -> None:
++        """Write the winning parameter value and its explicit-default flag
++        into the context.
++
++        :param ctx: The invocation context.
++        :param value: The processed value to store.
++        """
++        ctx.params[self.name] = value
++        ctx._param_default_explicit[self.name] = self._default_explicit
++
++    def _restore_param_slot_on_loss(
++        self,
++        ctx: Context,
++        existing_source: ParameterSource | None,
++    ) -> None:
++        """Restore the winning option's source after this parameter loses
++        the feature-switch group arbitration.
++
++        :param ctx: The invocation context.
++        :param existing_source: The :class:`ParameterSource` of the option
++            that already owned the slot.
++        """
++        if existing_source is not None:
++            ctx.set_parameter_source(self.name, existing_source)
++        # else: ctx.params[self.name] was populated by code that bypassed
++        # handle_parse_result (from another option's callback for example). Keep
++        # the provisional source recorded before process_value so downstream
++        # lookups don't return ``None``.
++
+     def handle_parse_result(
+         self, ctx: Context, opts: cabc.Mapping[str, t.Any], args: list[str]
+     ) -> tuple[t.Any, list[str]]:
+@@ -2598,10 +2666,6 @@ class Parameter(ABC):
+ 
+         :meta private:
+         """
+-        # Capture the slot's existing state before we mutate
+-        # ``_parameter_source`` so the write decision below can compare our
+-        # incoming source against the source of the option that already wrote
+-        # the slot (if any).
+         existing_value = ctx.params.get(self.name, UNSET)
+         existing_source = ctx.get_parameter_source(self.name)
+         existing_default_explicit = ctx._param_default_explicit.get(self.name, False)
+@@ -2609,12 +2673,8 @@ class Parameter(ABC):
+         with augment_usage_errors(ctx, param=self):
+             value, source = self.consume_value(ctx, opts)
+ 
+-            # Record the source before processing so eager callbacks and type
+-            # conversion can inspect it. Restored after arbitration if this
+-            # option loses a feature-switch group.
+             ctx.set_parameter_source(self.name, source)
+ 
+-            # Display a deprecation warning if necessary.
+             if (
+                 self.deprecated
+                 and value is not UNSET
+@@ -2630,45 +2690,20 @@ class Parameter(ABC):
+                 )
+                 echo(style(message, fg="red"), err=True)
+ 
+-            # Process the value through the parameter's type.
+             try:
+                 value = self.process_value(ctx, value)
+             except Exception:
+                 if not ctx.resilient_parsing:
+                     raise
+-                # In resilient parsing mode, we do not want to fail the command if the
+-                # value is incompatible with the parameter type, so we reset the value
+-                # to UNSET, which will be interpreted as a missing value.
+                 value = UNSET
+ 
+-        # Arbitrate the slot when several parameters target the same variable
+-        # name (feature-switch groups). See: https://github.com/pallets/click/issues/3403
+-        slot_empty = existing_value is UNSET
+-        more_explicit = existing_source is not None and source < existing_source
+-        same_source = existing_source is not None and source == existing_source
+-        auto_would_downgrade_explicit = (
+-            same_source
+-            and source == ParameterSource.DEFAULT
+-            and existing_default_explicit
+-            and not self._default_explicit
+-        )
+-        is_winner = (
+-            slot_empty
+-            or more_explicit
+-            or (same_source and not auto_would_downgrade_explicit)
+-        )
+-
+-        if is_winner:
++        if self._should_update_param_slot(
++            ctx, existing_value, existing_source, existing_default_explicit, source
++        ):
+             if self.expose_value:
+-                ctx.params[self.name] = value
+-                ctx._param_default_explicit[self.name] = self._default_explicit
+-        elif existing_source is not None:
+-            # Lost arbitration; restore the winning option's source.
+-            ctx.set_parameter_source(self.name, existing_source)
+-        # else: ctx.params[self.name] was populated by code that bypassed
+-        # handle_parse_result (from another option's callback for example). Keep
+-        # the provisional source recorded before process_value so downstream
+-        # lookups don't return ``None``.
++                self._apply_param_slot_update(ctx, value)
++        else:
++            self._restore_param_slot_on_loss(ctx, existing_source)
+ 
+         return value, args
+ 
