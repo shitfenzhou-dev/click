@@ -1,0 +1,86 @@
+diff --git a/src/click/core.py b/src/click/core.py
+index bc04f64..c130d15 100644
+--- a/src/click/core.py
++++ b/src/click/core.py
+@@ -2584,6 +2584,43 @@ class Parameter(ABC):
+ 
+         return rv
+ 
++    def _should_update_param_slot(
++        self,
++        existing_value: t.Any,
++        existing_source: ParameterSource | None,
++        existing_default_explicit: bool,
++        source: ParameterSource,
++    ) -> bool:
++        """Determine whether the current parameter should overwrite the
++        ``ctx.params`` slot for its name.
++
++        Used by :meth:`handle_parse_result` to arbitrate feature-switch
++        groups where multiple parameters target the same variable name.
++
++        :param existing_value: The value already stored in ``ctx.params``
++            for this parameter name, or ``UNSET`` if the slot is empty.
++        :param existing_source: The :class:`ParameterSource` of the
++            option that last wrote the slot, or ``None``.
++        :param existing_default_explicit: Whether the existing slot owner
++            had an explicit ``default`` set at construction time.
++        :param source: The :class:`ParameterSource` produced by the
++            current parameter's :meth:`consume_value`.
++        """
++        slot_empty = existing_value is UNSET
++        more_explicit = existing_source is not None and source < existing_source
++        same_source = existing_source is not None and source == existing_source
++        auto_would_downgrade_explicit = (
++            same_source
++            and source == ParameterSource.DEFAULT
++            and existing_default_explicit
++            and not self._default_explicit
++        )
++        return (
++            slot_empty
++            or more_explicit
++            or (same_source and not auto_would_downgrade_explicit)
++        )
++
+     def handle_parse_result(
+         self, ctx: Context, opts: cabc.Mapping[str, t.Any], args: list[str]
+     ) -> tuple[t.Any, list[str]]:
+@@ -2641,34 +2678,14 @@ class Parameter(ABC):
+                 # to UNSET, which will be interpreted as a missing value.
+                 value = UNSET
+ 
+-        # Arbitrate the slot when several parameters target the same variable
+-        # name (feature-switch groups). See: https://github.com/pallets/click/issues/3403
+-        slot_empty = existing_value is UNSET
+-        more_explicit = existing_source is not None and source < existing_source
+-        same_source = existing_source is not None and source == existing_source
+-        auto_would_downgrade_explicit = (
+-            same_source
+-            and source == ParameterSource.DEFAULT
+-            and existing_default_explicit
+-            and not self._default_explicit
+-        )
+-        is_winner = (
+-            slot_empty
+-            or more_explicit
+-            or (same_source and not auto_would_downgrade_explicit)
+-        )
+-
+-        if is_winner:
++        if self._should_update_param_slot(
++            existing_value, existing_source, existing_default_explicit, source
++        ):
+             if self.expose_value:
+                 ctx.params[self.name] = value
+                 ctx._param_default_explicit[self.name] = self._default_explicit
+         elif existing_source is not None:
+-            # Lost arbitration; restore the winning option's source.
+             ctx.set_parameter_source(self.name, existing_source)
+-        # else: ctx.params[self.name] was populated by code that bypassed
+-        # handle_parse_result (from another option's callback for example). Keep
+-        # the provisional source recorded before process_value so downstream
+-        # lookups don't return ``None``.
+ 
+         return value, args
+ 
