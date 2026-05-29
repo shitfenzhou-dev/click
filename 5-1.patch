@@ -1,0 +1,89 @@
+diff --git a/src/click/core.py b/src/click/core.py
+index bc04f64..3d4d858 100644
+--- a/src/click/core.py
++++ b/src/click/core.py
+@@ -2584,6 +2584,44 @@ class Parameter(ABC):
+ 
+         return rv
+ 
++    def _should_update_param_slot(
++        self,
++        existing_value: t.Any,
++        existing_source: ParameterSource | None,
++        existing_default_explicit: bool,
++        source: ParameterSource,
++    ) -> bool:
++        # Arbitrate the slot when several parameters target the same variable
++        # name (feature-switch groups). See: https://github.com/pallets/click/issues/3403
++        if existing_value is UNSET:
++            return True
++
++        if existing_source is None:
++            return False
++
++        if source < existing_source:
++            return True
++
++        if source != existing_source:
++            return False
++
++        auto_would_downgrade_explicit = (
++            source == ParameterSource.DEFAULT
++            and existing_default_explicit
++            and not self._default_explicit
++        )
++        return not auto_would_downgrade_explicit
++
++    def _update_param_slot(self, ctx: Context, value: t.Any) -> None:
++        ctx.params[self.name] = value
++        ctx._param_default_explicit[self.name] = self._default_explicit
++
++    def _restore_param_slot_source(
++        self, ctx: Context, existing_source: ParameterSource | None
++    ) -> None:
++        if existing_source is not None:
++            ctx.set_parameter_source(self.name, existing_source)
++
+     def handle_parse_result(
+         self, ctx: Context, opts: cabc.Mapping[str, t.Any], args: list[str]
+     ) -> tuple[t.Any, list[str]]:
+@@ -2641,30 +2679,19 @@ class Parameter(ABC):
+                 # to UNSET, which will be interpreted as a missing value.
+                 value = UNSET
+ 
+-        # Arbitrate the slot when several parameters target the same variable
+-        # name (feature-switch groups). See: https://github.com/pallets/click/issues/3403
+-        slot_empty = existing_value is UNSET
+-        more_explicit = existing_source is not None and source < existing_source
+-        same_source = existing_source is not None and source == existing_source
+-        auto_would_downgrade_explicit = (
+-            same_source
+-            and source == ParameterSource.DEFAULT
+-            and existing_default_explicit
+-            and not self._default_explicit
+-        )
+-        is_winner = (
+-            slot_empty
+-            or more_explicit
+-            or (same_source and not auto_would_downgrade_explicit)
++        should_update_slot = self._should_update_param_slot(
++            existing_value=existing_value,
++            existing_source=existing_source,
++            existing_default_explicit=existing_default_explicit,
++            source=source,
+         )
+ 
+-        if is_winner:
++        if should_update_slot:
+             if self.expose_value:
+-                ctx.params[self.name] = value
+-                ctx._param_default_explicit[self.name] = self._default_explicit
+-        elif existing_source is not None:
++                self._update_param_slot(ctx, value)
++        else:
+             # Lost arbitration; restore the winning option's source.
+-            ctx.set_parameter_source(self.name, existing_source)
++            self._restore_param_slot_source(ctx, existing_source)
+         # else: ctx.params[self.name] was populated by code that bypassed
+         # handle_parse_result (from another option's callback for example). Keep
+         # the provisional source recorded before process_value so downstream
